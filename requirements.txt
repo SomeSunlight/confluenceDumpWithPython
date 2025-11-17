@@ -3,3 +3,4 @@ Pillow
 pandoc
 pypandoc
 requests
+tqdm

@@ -1,142 +1,145 @@
-# Confluence Dump With Python
+# Confluence Dump with Python
 
-Dump Confluence pages using Python (requests) in HTML and RST format, including embedded pictures and attachments.
-References to downloaded files will be updated to their local relative path.
+This script exports content from a Confluence instance (Cloud or Data Center) using various modes (single page, page tree, full space, all spaces, or by label).
 
-## Description
+**Key Features:**
 
-Nonetheless, the refactoring will require only 2 files and accept command-line args:
-* `myModules.py`: Contains all the required functions.
-* `confluenceDumpWithPython.py`: Script to use with the following command line args:
-  * `-m, --mode`: The export mode, `single`, `space`, `bylabel`, `pageprops` (required).
-    * Note: Only `single`, `pageprops` and `space` have been implemented so far.
-  * `-S, --site`: The Atlassian Site (required).
-  * `-s, --space`: The Space Key (if needed).
-  * `-p, --page`: The Page ID (if needed).
-  * `-l, --label`: The Page label (if needed).
-  * `-x, --sphinx`: The `_images` and `_static` folders are placed at the root of the export folder, instead of together with the exported HTML files.
-  * `--notags`: Does not add the tags directives to the rst files (when the `sphinx-tags` addon is not used).
-* `updatePageLinks.py`: Update online confluence links to the local files that have been downloaded so far.
-  * `--folder`: Folder containing the files to update.
-  * `--test`: Instead of overwriting the original .rst files, it will create updated ones with `zout_` as a prefix.
-* `getPageEditorVersion.py`: Get the editor version from single pages or all pages in a space.
-  * `--site`: The Atlassian Site (required).
-  * `--page`: Page ID (either/or)
-  * `--space`: Space Key (either/or)
+- **Visual Copy:** Fetches the rendered HTML (`export_view`) to preserve macros, tables, and formatting.
+    
+- **Offline Browsing:** Downloads embedded images/emoticons and rewrites links to be relative, creating a self-contained offline HTML archive.
+    
+- **Metadata:** Injects Confluence metadata (Page ID, Labels, Title) directly into the HTML headers.
+    
+- **Complete Archive:** Downloads _all_ page attachments, not just those displayed on the page.
+    
+- **Multi-Format:** Exports as JSON (metadata + raw body), HTML (visual), and optional RST.
+    
 
-For CSS Styling, it uses the `confluence.css` from Confluence that can be obtained by using the Workaround described in: https://jira.atlassian.com/browse/CONFSERVER-40907.
-The `site.css` file included with Confluence UI HTML exports is not as complete as the one above.
+## Platform Support
 
-### Folder and file structure:
+This script supports both:
 
-* The default output folder is `output/` under the same path as the script.
-* A folder with the Space name, Page Properties report page, single page name or Page Label name will be created under the output folder.
-* By default, the `_images/` and `_static/` folders will be placed in the page|space|pageprops|label folder.
-  * The `--sphinx` command line option will put those folder directly under the output folder
-* The file `styles/confluence.css` will be copied into the defined `_static/`
+- **Confluence Cloud**
+    
+- **Confluence Data Center**
+    
 
-## What it does
-
-* Leverages the Confluence Cloud API
-* Puts Confluence meta data like Page ID and Page Labels, in the HTML headers and RST fields.
-* beautifulsoup is used to parse HTML to get and update content, ie. change remote links to local links.
-* Download for every page, all attachments, emoticons and embedded files.
+The platform-specific API paths and authentication methods are defined in the `confluence_products.ini` file.
 
 ## Requirements
 
-* declare system variables:
-  * `atlassianAPIToken`
-  * `atlassianUserEmail`
+- Python 3.x
+    
+- `requests`
+    
+- `beautifulsoup4` (for HTML parsing and link rewriting)
+    
+- `pypandoc` (optional, for RST export or legacy HTML conversion)
+    
 
-### Dependencies
-
-* python3
-  * requests
-  * beautifulsoup4
-  * Pillow (handle images)
-  * pandoc & pypandoc (convert to RST)
-  * re
-
-### Installing
-
-* Clone repo.
-* Install dependencies.
-* Declare system variables for Atlassian API Token.
-
-### Executing program
-
-
-* How to download a single page based on its ID.
+## Installation
 
 ```
-confluenceDumpWithPython.py -m single -S <site Name> -p <ID of page to dump> [<output folder>] [--sphinx]
+git clone [https://github.com/jgoldin-skillz/confluenceDumpWithPython.git](https://github.com/jgoldin-skillz/confluenceDumpWithPython.git)
+cd confluenceDumpWithPython
+pip install -r requirements.txt
 ```
 
-* How to download Page Properties and all the contained pages.
+## Authentication
+
+Authentication is handled via environment variables, based on the profile you select.
+
+### For Confluence Cloud (`--profile cloud`)
 
 ```
-confluenceDumpWithPython.py -m pageprops -S <site Name> -p <ID of page properties report page> [<output folder>] [--sphinx]
+export CONFLUENCE_USER="your-email@example.com"
+export CONFLUENCE_TOKEN="YourApiTokenHere"
 ```
 
-* How to download a whole Space.
+### For Confluence Data Center (`--profile dc`)
 
 ```
-confluenceDumpWithPython.py -m space -S <site Name> -s <space KEY> [<output folder>]
+export CONFLUENCE_TOKEN="YourPersonalAccessTokenHere"
 ```
 
-## Help
+**⚠️ Troubleshooting Note for Data Center:** If authentication fails (Intranet/SSO blocks), ensure you are on VPN and PATs are enabled.
 
-No special advice other than:
-* make sure that your Atlassian API Token is valid.
-* the username for the Cloud Atlassian API is the e-mail address.
+## Exporting with CSS Styling
 
-## Authors
+The script uses a robust **Two-Layer Styling Strategy** to ensure the exported HTML looks correct.
 
-Contributors names and contact info
+### Layer 1: Standard CSS (Default)
 
-@dernorberto
+The project folder contains a `styles/` directory. This should contain a "Best Guess" CSS file (e.g., `site.css`) extracted from a standard Confluence instance.
 
-## Improvements
+- **Automatic:** If a CSS file exists in the local `styles/` folder, it is **automatically applied** to every export.
+    
+- **Maintenance:** You can update this file manually if Confluence changes its base layout significantly.
+    
 
-- [ ] Add export based on page label.
-- [x] Add links to Downloads for the corresponding pages.
-- [x] Update all links from downloaded pages to the local copies.
-- [x] Add to headers the parent page and page labels.
-- [ ] Create an index of the pages to use as a TOC.
-- [ ] Create a page layout to display TOC + articles.
-- [x] Copy `styles/site.css` into `output/styles/` if not present.
-- [ ] Allow using with Confluence Server.
+### Layer 2: Custom CSS (Optional)
 
-## Issues
+If you have specific styles for your Space (logos, colors, custom macros) that override the standard look, you can provide a second CSS file via the command line.
 
-* It does not like very long attachment files, you'll need to rename them in Confluence before the dump.
-* Pages previously migrated from Confluence Server might have issues with old emoticons. The best is to convert the pages to the New Editor, which will replace the missing emoticons.
+- **Usage:** Use `--css-file "/path/to/my_custom.css"`.
+    
+- **Behavior:** This file will be loaded **after** the standard CSS, allowing you to override specific styles without losing the basic formatting.
+    
 
-## Version History
-* 1.4
-  * Refactoring into a more simple file setup (`confluenceDumpWithPython.py` & `myModules.py`)
-* 1.3
-  * Added Space export (flat folder structure)
-* 1.2
-  * Added better HTML header and footer.
-  * Added page labels to HTML headers.
-  * Improved output folder argument logic.
-* 1.1
-  * Added Papge Properties dump and other smaller things
-* 1.0
-  * Initial Release
+## Usage
 
-## legacy/ folder with previous version of scripts
+### General Syntax
 
-Purpose of the files:
-1. `confluenceExportHTMLrequestsByLabel.py`: download a set of pages based on one (or more) page Labels.
-2. `confluenceExportHTMLrequestsSingle.py`: download a single page by supplying the page ID as an argument.
-3. `confluenceExportHTMLrequestsPagePropertiesReport.py`: download page properties and all the pages in the report by supplying the page ID as an argument.
-4. `confluenceExportHTMLrequestsPagesInSpace.py`: download all pages from a space.
+```
+python3 confluenceDumpWithPython.py [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS]
+```
 
-## License
+### Command-Line Arguments
 
-This project is licensed under the MIT License - see the LICENSE.txt file for details
+Run `python3 confluenceDumpWithPython.py -h` to see all options.
 
-## Acknowledgments
+```
+usage: confluenceDumpWithPython.py [-h] -o OUTDIR --base-url BASE_URL --profile PROFILE [--context-path CONTEXT_PATH] [-R] [--css-file CSS_FILE] {single,tree,space,all-spaces,label} ...
 
+Global Options:
+  -h, --help            show this help message and exit
+  -o OUTDIR, --outdir OUTDIR
+                        The output directory (will be created)
+  --base-url BASE_URL   The full base URL.
+  --profile PROFILE     Platform profile ('cloud' or 'dc').
+  --context-path CONTEXT_PATH
+                        (Data Center only) Manually override the context path.
+  -R, --rst             Export pages as RST.
+  --css-file CSS_FILE   Path to a local custom CSS file (applied AFTER standard CSS).
+```
+
+### Examples
+
+#### 1\. Standard Dump (Uses default CSS)
+
+Dumps a page tree. Automatically applies `styles/site.css` if present in the script folder.
+
+```
+python3 confluenceDumpWithPython.py \
+    --base-url "[https://confluence.mycompany.com](https://confluence.mycompany.com)" \
+    --profile "dc" \
+    --context-path "/wiki" \
+    -o "./tree_dump" \
+    tree \
+    --pageid "67890"
+```
+
+#### 2\. Customized Dump (Standard + Custom CSS)
+
+Dumps a page tree. Applies `styles/site.css` (standard) AND `my_overrides.css` (custom).
+
+```
+python3 confluenceDumpWithPython.py \
+    --base-url "[https://confluence.mycompany.com](https://confluence.mycompany.com)" \
+    --profile "dc" \
+    --context-path "/wiki" \
+    -o "./tree_dump" \
+    --css-file "./my_overrides.css" \
+    tree \
+    --pageid "67890"
+```
