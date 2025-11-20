@@ -2,7 +2,7 @@
 """
 Module to abstract Confluence API calls and provide local file/directory utilities.
 Supports both Confluence Cloud and Data Center platforms.
-Includes BeautifulSoup logic for HTML processing (downloading assets, fixing links).
+Includes BeautifulSoup logic for HTML processing (downloading assets, fixing links, injecting sidebar).
 """
 
 import os
@@ -12,7 +12,8 @@ import configparser
 import re
 from requests.auth import HTTPBasicAuth
 from urllib.parse import unquote, urlparse
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
+from datetime import datetime
 
 # --- Globals for output directories ---
 outdir_base = ""
@@ -108,6 +109,7 @@ def _build_api_url(base_url, platform_config, context_path_override, template_ke
 
 
 def _execute_get_request(url, auth_info, params=None):
+    """ Executes GET request. Prints ERRORS to stderr, but stays silent on success. """
     headers = {"Accept": "application/json"}
     if isinstance(auth_info, dict): headers.update(auth_info)
 
@@ -115,16 +117,23 @@ def _execute_get_request(url, auth_info, params=None):
         resp = requests.get(url, headers=headers, auth=auth_info if not isinstance(auth_info, dict) else None,
                             params=params)
         resp.raise_for_status()
+
+        # Robust check for HTML responses (SSO redirects) with specific hints
         if 'application/json' not in resp.headers.get('Content-Type', ''):
-            print("Error: Non-JSON response. Likely Auth/SSO issue.", file=sys.stderr)
+            print(f"Error: Non-JSON response from {url} (Content-Type: {resp.headers.get('Content-Type')})",
+                  file=sys.stderr)
+            print("This often happens on authentication failure (redirect to HTML login page).", file=sys.stderr)
+
             if isinstance(auth_info, dict):
-                print("[Hint]: Check VPN/Intranet connection for Data Center.", file=sys.stderr)
+                print("\n[Data Center Hint]: Are you connected to the VPN/Intranet?", file=sys.stderr)
+                print("Many companies block API access from outside the corporate network.", file=sys.stderr)
                 print("Also ensure that Personal Access Tokens are not disabled by an SSO policy.", file=sys.stderr)
-                print("Please verify your CONFLUENCE_TOKEN environment variable.", file=sys.stderr)
             else:
-                print("\nPlease verify your CONFLUENCE_USER and CONFLUENCE_TOKEN environment variables.",
+                print("\n[Cloud Hint]: Please verify your CONFLUENCE_USER and CONFLUENCE_TOKEN environment variables.",
                       file=sys.stderr)
+
             return None
+
         return resp.json()
     except Exception as e:
         print(f"Request Error: {e}", file=sys.stderr)
@@ -139,9 +148,6 @@ def get_page_view_url(base_url, platform_config, context_path_override, spaceKey
 # --- Downloader ---
 
 def download_file(url, local_filename, auth_info):
-    """
-    Downloads a file (image/attachment) from a URL to the local file system.
-    """
     headers = {}
     auth_obj = None
     if isinstance(auth_info, dict):
@@ -157,79 +163,301 @@ def download_file(url, local_filename, auth_info):
                     f.write(chunk)
         return True
     except Exception as e:
-        print(f"    Failed to download {url}: {e}", file=sys.stderr)
+        print(f"Download Error {url}: {e}", file=sys.stderr)
         return False
 
 
 # --- HTML Processor (The Core Logic) ---
 
-def process_page_content(html_content, page_metadata, base_url, auth_info, css_files=None, exported_page_ids=None):
+def inject_sidebar(soup, sidebar_html, current_page_id):
+    """
+    Injects the sidebar HTML, wraps content in a layout,
+    and highlights the current page/opens parent folders.
+    """
+    if not sidebar_html: return soup
+
+    # 1. Parse Sidebar
+    sidebar_soup = BeautifulSoup(sidebar_html, 'html.parser')
+
+    # 2. Highlight Current Page & Open Parents
+    target_href = f"{current_page_id}.html"
+    active_link = sidebar_soup.find('a', href=target_href)
+
+    if active_link:
+        # Add active class
+        active_link['class'] = active_link.get('class', []) + ['active-page']
+
+        # Walk up the tree and set 'open' on all <details> ancestors
+        parent = active_link.parent
+        while parent:
+            if parent.name == 'details':
+                parent['open'] = ''  # Set attribute
+            parent = parent.parent
+
+    # 3. Create Layout Wrapper
+    if soup.body:
+        # Toggle Button
+        toggle_btn = soup.new_tag('button', id='sidebar-toggle', attrs={'title': 'Toggle Sidebar'})
+        toggle_btn.string = "☰"
+
+        layout_div = soup.new_tag('div', attrs={'class': 'layout-container'})
+
+        aside = soup.new_tag('aside', id='sidebar')
+        aside.append(Comment(" CONFLUENCE-SIDEBAR-START "))
+
+        if sidebar_soup.body:
+            for child in list(sidebar_soup.body.children):
+                aside.append(child)
+        else:
+            for child in list(sidebar_soup.children):
+                aside.append(child)
+
+        aside.append(Comment(" CONFLUENCE-SIDEBAR-END "))
+
+        # JS Resizer Handle
+        resizer = soup.new_tag('div', id='resizer')
+
+        main_content = soup.new_tag('main', id='content')
+
+        # Move existing body content into main
+        for content in list(soup.body.contents):
+            main_content.append(content)
+
+        layout_div.append(aside)
+        layout_div.append(resizer)
+        layout_div.append(main_content)
+
+        soup.body.clear()
+        soup.body.append(toggle_btn)
+        soup.body.append(layout_div)
+
+        # Inject Scripts (Toggle + Resizer + Persistence)
+        script = soup.new_tag('script')
+        script.string = """
+            document.addEventListener('DOMContentLoaded', function() {
+                const btn = document.getElementById('sidebar-toggle');
+                const sidebar = document.getElementById('sidebar');
+                const resizer = document.getElementById('resizer');
+
+                const savedWidth = localStorage.getItem('sidebarWidth');
+                if (savedWidth && sidebar) {
+                    sidebar.style.width = savedWidth;
+                    sidebar.style.flexBasis = savedWidth;
+                }
+
+                if (btn && sidebar) {
+                    btn.addEventListener('click', function() {
+                        sidebar.classList.toggle('collapsed');
+                    });
+                }
+
+                if (resizer && sidebar) {
+                    let isResizing = false;
+                    resizer.addEventListener('mousedown', (e) => {
+                        isResizing = true;
+                        document.body.style.cursor = 'col-resize';
+                        resizer.classList.add('active');
+                    });
+                    document.addEventListener('mousemove', (e) => {
+                        if (!isResizing) return;
+                        let newWidth = e.clientX;
+                        if (newWidth < 50) newWidth = 50;
+                        if (newWidth > window.innerWidth * 0.6) newWidth = window.innerWidth * 0.6;
+                        sidebar.style.width = newWidth + 'px';
+                        sidebar.style.flexBasis = newWidth + 'px';
+                    });
+                    document.addEventListener('mouseup', () => {
+                        if (isResizing) {
+                            localStorage.setItem('sidebarWidth', sidebar.style.width);
+                        }
+                        isResizing = false;
+                        document.body.style.cursor = 'default';
+                        resizer.classList.remove('active');
+                    });
+                }
+            });
+        """
+        soup.body.append(script)
+
+    return soup
+
+
+def process_page_content(html_content, page_metadata, base_url, auth_info, css_files=None, exported_page_ids=None,
+                         sidebar_html=None):
     """
     Parses the HTML content using BeautifulSoup.
-    1. Injects Metadata.
-    2. Downloads images.
-    3. SMART LINK REWRITING:
-       - If link target IS in exported_page_ids -> Rewrite to ID.html (Offline link)
-       - If link target is NOT in exported_page_ids -> Keep/Make absolute URL (Online link)
-    4. Injects CSS links.
-
-    Returns:
-        str: The processed, standalone HTML.
+    1. Injects Metadata (Head).
+    2. Injects Page Title & Modification Info (Body Top).
+    3. Downloads images & fixes links.
+    4. Injects CSS & Sidebar.
     """
-    if not html_content:
-        return ""
+    # FIX: Handle empty content gracefully by initializing soup with empty string.
+    # This ensures Title, Metadata, and Sidebar are still generated for folder-only pages.
+    soup = BeautifulSoup(html_content or "", 'html.parser')
 
-    soup = BeautifulSoup(html_content, 'html.parser')
-
-    # Ensure exported_page_ids is a set for fast lookup (or empty set if None)
     valid_ids = set(exported_page_ids) if exported_page_ids else set()
+    page_id = page_metadata.get('id')
 
     # 1. Metadata Injection (Head)
-    # Create head if missing (export_view usually just gives body fragments)
     if not soup.head:
         head = soup.new_tag('head')
         soup.insert(0, head)
 
-    # Title
+    title_string = page_metadata.get('title', 'Untitled')
     title_tag = soup.new_tag('title')
-    title_tag.string = page_metadata.get('title', 'Untitled')
+    title_tag.string = title_string
     soup.head.append(title_tag)
 
-    # Meta Tags
-    meta_id = soup.new_tag('meta', attrs={'name': 'confluence-page-id', 'content': page_metadata.get('id')})
+    meta_id = soup.new_tag('meta', attrs={'name': 'confluence-page-id', 'content': page_id})
     soup.head.append(meta_id)
 
     labels = [l['name'] for l in page_metadata.get('metadata', {}).get('labels', {}).get('results', [])]
     meta_labels = soup.new_tag('meta', attrs={'name': 'confluence-labels', 'content': ', '.join(labels)})
     soup.head.append(meta_labels)
 
-    # CSS Links (Inject all provided CSS files)
-    if css_files:
-        for css_path in css_files:
-            link_css = soup.new_tag('link', attrs={'rel': 'stylesheet', 'href': css_path, 'type': 'text/css'})
-            soup.head.append(link_css)
-
-    # Body wrapper (if missing)
+    # --- Inject Title & Metadata in Body ---
     if not soup.body:
         body = soup.new_tag('body')
+        # Move any loose children to body (if any existed in empty string scenario)
         for element in list(soup.children):
             if element.name != 'head':
                 body.append(element)
         soup.append(body)
 
+    # Construct Header Block
+    h1 = soup.new_tag('h1')
+    h1.string = title_string
+
+    # Metadata Line
+    version_info = page_metadata.get('version', {})
+    author_name = "Unknown"
+    date_str = "Unknown Date"
+
+    if 'by' in version_info and 'displayName' in version_info['by']:
+        author_name = version_info['by']['displayName']
+
+    if 'when' in version_info:
+        try:
+            dt = datetime.strptime(version_info['when'].split('.')[0], "%Y-%m-%dT%H:%M:%S")
+            date_str = dt.strftime("%d. %b %Y")
+        except:
+            date_str = version_info['when']
+
+    meta_div = soup.new_tag('div', attrs={'class': 'page-metadata'})
+    meta_ul = soup.new_tag('ul')
+    meta_li = soup.new_tag('li', attrs={'class': 'page-metadata-modification-info'})
+
+    meta_li.append("Zuletzt aktualisiert von ")
+    span_author = soup.new_tag('span', attrs={'class': 'author'})
+    span_author.string = author_name
+    meta_li.append(span_author)
+    meta_li.append(" am ")
+    span_date = soup.new_tag('span', attrs={'class': 'last-modified'})
+    span_date.string = date_str
+    meta_li.append(span_date)
+
+    meta_ul.append(meta_li)
+    meta_div.append(meta_ul)
+
+    soup.body.insert(0, meta_div)
+    soup.body.insert(0, h1)
+
+    # CSS Injection
+    style_tag = soup.new_tag('style')
+    style_tag.string = """
+        /* Global Reset */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .layout-container { display: flex; height: 100vh; overflow: hidden; }
+
+        /* Sidebar Styling */
+        #sidebar { 
+            flex: 0 0 auto;
+            width: 350px; 
+            min-width: 50px; 
+            border-right: 1px solid #ddd; 
+            overflow-y: auto; 
+            padding: 10px;
+            padding-left: 15px; 
+            padding-top: 60px; 
+            padding-right: 4px; 
+            background: #f4f5f7; 
+            font-size: 14px;
+            resize: horizontal; 
+            position: relative;
+            transition: width 0.2s, padding 0.2s;
+        }
+
+        #sidebar.collapsed {
+            width: 0px !important; min-width: 0 !important; padding: 0; border: none; overflow: hidden; flex-basis: 0 !important;
+        }
+
+        /* Resizer Handle */
+        #resizer {
+            width: 5px; cursor: col-resize; background-color: transparent; border-left: 1px solid #eee; transition: background-color 0.2s; flex: 0 0 auto; z-index: 10;
+        }
+        #resizer:hover, #resizer.active { background-color: #4c9aff; }
+
+        /* Toggle Button */
+        #sidebar-toggle {
+            position: fixed; top: 15px; left: 15px; z-index: 9999;
+            background: rgba(255, 255, 255, 0.9); border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            font-size: 20px; cursor: pointer; color: #42526e;
+            width: 32px; height: 32px; line-height: 30px; text-align: center; padding: 0;
+        }
+        #sidebar-toggle:hover { background: #ebecf0; }
+
+        /* Content Area */
+        #content { 
+            flex: 1; 
+            overflow-y: auto; 
+            padding: 40px 30px !important; 
+            max-width: 100%; 
+        }
+
+        /* Metadata Styling */
+        h1 { margin-top: 0; color: #172b4d; font-size: 2em; font-weight: 600; }
+        .page-metadata { margin-bottom: 20px; font-size: 12px; color: #6b778c; }
+        .page-metadata ul { list-style: none; padding: 0; margin: 0; }
+        .page-metadata li { display: inline-block; margin-right: 10px; }
+
+        /* Sidebar Tree */
+        #sidebar ul { list-style: none; padding-left: 28px; margin: 0; }
+        #sidebar li { margin: 4px 0; white-space: normal; word-wrap: break-word; }
+        #sidebar li.leaf { list-style: disc; margin-left: 18px; } 
+        #sidebar li.folder { list-style: none; }
+
+        #sidebar summary { cursor: pointer; font-weight: 500; margin-bottom: 2px; color: #42526e; outline: none; }
+        #sidebar summary > a { color: #42526e; text-decoration: none; }
+        #sidebar summary > a:hover { text-decoration: underline; color: #0052cc; }
+
+        #sidebar a { text-decoration: none; color: #42526e; }
+        #sidebar a:hover { color: #0052cc; text-decoration: underline; }
+        #sidebar a.active-page { color: #0052cc; font-weight: bold; }
+
+        #sidebar details > summary { list-style: none; }
+        #sidebar details > summary::-webkit-details-marker { display: none; }
+        #sidebar details > summary::before { content: '▶'; display: inline-block; font-size: 10px; margin-right: 6px; color: #6b778c; transition: transform 0.2s; }
+        #sidebar details[open] > summary::before { transform: rotate(90deg); }
+    """
+    soup.head.append(style_tag)
+
+    if css_files:
+        for css_path in css_files:
+            link_css = soup.new_tag('link', attrs={'rel': 'stylesheet', 'href': css_path, 'type': 'text/css'})
+            soup.head.append(link_css)
+
     # 2. Image Downloading & rewriting
     for img in soup.find_all('img'):
         src = img.get('src')
-        if not src:
-            continue
+        if not src: continue
 
-        # Construct full URL if relative
         if src.startswith('/'):
             full_url = base_url.rstrip('/') + src
         else:
             full_url = src
 
-        # Only download Confluence assets
         if '/download/' in src or '/images/icons/' in src:
             filename = unquote(os.path.basename(urlparse(src).path))
             local_path = os.path.join(outdir_attachments, filename)
@@ -239,62 +467,59 @@ def process_page_content(html_content, page_metadata, base_url, auth_info, css_f
             else:
                 print(f"    Warning: Could not download image {src}", file=sys.stderr)
 
-    # 3. Link Rewriting (The Smart Logic)
+    # 3. Link Rewriting
     for a in soup.find_all('a'):
         href = a.get('href')
         if not href: continue
 
         target_id = None
-
-        # Attempt to extract Page ID from the link
         linked_id = a.get('data-linked-resource-id')
         resource_type = a.get('data-linked-resource-type')
 
         if linked_id and (not resource_type or resource_type == 'page'):
             target_id = linked_id
         elif '/pages/' in href:
-            # Data Center URL pattern detection
             match = re.search(r'/pages/(\d+)', href)
             if match: target_id = match.group(1)
         elif 'pageId=' in href:
-            # Query param detection
             try:
                 target_id = re.search(r'pageId=(\d+)', href).group(1)
             except:
                 pass
 
-        # Decision Logic
         if target_id and target_id in valid_ids:
-            # CASE A: Page is in our export -> Make relative offline link
             a['href'] = f"{target_id}.html"
         else:
-            # CASE B: Page is NOT in export (or external link) -> Ensure absolute online link
-            # If it's a relative link (starts with /), prepend the base_url
             if href.startswith('/'):
                 a['href'] = base_url.rstrip('/') + href
-            # If it's already absolute (http...), leave it alone.
+
+    # 4. Sidebar Injection
+    if sidebar_html:
+        soup = inject_sidebar(soup, sidebar_html, page_id)
 
     return str(soup)
 
 
-# --- API Calls (Updated for export_view) ---
-# Note: Removed print statements to keep output clean for progress bars.
-
+# ... (API Calls unchanged) ...
 def get_page_full(pageId, base_url, platform_config, auth_info, context_path_override):
-    # print(f"Fetching details for page: {pageId}") # DISABLED
-    params = {'expand': 'body.export_view,version,ancestors,space,metadata.labels'}
+    params_export = {'expand': 'body.export_view,version,ancestors,space,metadata.labels'}
     path_params = {'pageId': pageId}
-
     url = _build_api_url(base_url, platform_config, context_path_override, 'url_get_page', path_params)
+    return _execute_get_request(url, auth_info, params=params_export)
 
-    data = _execute_get_request(url, auth_info, params=params)
-    if not data: return None
 
-    spaceKey = data.get('space', {}).get('key')
-    if spaceKey:
-        data['view_url'] = get_page_view_url(base_url, platform_config, context_path_override, spaceKey, pageId)
+def get_child_pages(pageId, base_url, platform_config, auth_info, context_path_override):
+    url = _build_api_url(base_url, platform_config, context_path_override, 'url_get_child_pages', {'pageId': pageId})
+    params = {'limit': 200, 'expand': 'ancestors,metadata.labels'}
+    return _execute_get_request(url, auth_info, params=params)
 
-    return data
+
+def get_space_homepage(spaceKey, base_url, platform_config, auth_info, context_path_override):
+    url = _build_api_url(base_url, platform_config, context_path_override, 'url_get_space', {'spaceKey': spaceKey})
+    space_info = _execute_get_request(url, auth_info, {'expand': 'homepage'})
+    if space_info and 'homepage' in space_info:
+        return space_info['homepage']
+    return None
 
 
 def get_page_basic(pageId, base_url, platform_config, auth_info, context_path_override):
@@ -304,14 +529,12 @@ def get_page_basic(pageId, base_url, platform_config, auth_info, context_path_ov
 
 
 def get_page_children(pageId, base_url, platform_config, auth_info, context_path_override):
-    # print(f"Fetching children for page: {pageId}") # DISABLED
     url = _build_api_url(base_url, platform_config, context_path_override, 'url_cql_search')
-    params = {'cql': f'parent={pageId}', 'limit': 200}
+    params = {'cql': f'parent={pageId}', 'limit': 200, 'expand': 'ancestors'}
     return _execute_get_request(url, auth_info, params=params)
 
 
 def get_page_attachments(pageId, base_url, platform_config, auth_info, context_path_override):
-    # print(f"Fetching attachment list for page: {pageId}") # DISABLED
     path_params = {'pageId': pageId}
     url = _build_api_url(base_url, platform_config, context_path_override, 'url_get_attachments', path_params)
     params = {'limit': 200}
@@ -319,21 +542,18 @@ def get_page_attachments(pageId, base_url, platform_config, auth_info, context_p
 
 
 def get_pages_from_space(spaceKey, start, limit, base_url, platform_config, auth_info, context_path_override):
-    # print(f"Fetching pages for space '{spaceKey}' ({start}-{start+limit})") # DISABLED
     url = _build_api_url(base_url, platform_config, context_path_override, 'url_cql_search')
-    params = {'cql': f'space="{spaceKey}"', 'start': start, 'limit': limit}
+    params = {'cql': f'space="{spaceKey}"', 'start': start, 'limit': limit, 'expand': 'ancestors'}
     return _execute_get_request(url, auth_info, params=params)
 
 
 def get_pages_by_label(label, start, limit, base_url, platform_config, auth_info, context_path_override):
-    # print(f"Fetching pages with label '{label}' ({start}-{start+limit})") # DISABLED
     url = _build_api_url(base_url, platform_config, context_path_override, 'url_cql_search')
-    params = {'cql': f'label="{label}"', 'start': start, 'limit': limit}
+    params = {'cql': f'label="{label}"', 'start': start, 'limit': limit, 'expand': 'ancestors'}
     return _execute_get_request(url, auth_info, params=params)
 
 
 def get_all_spaces(base_url, platform_config, auth_info, context_path_override):
-    # print("Fetching all spaces...") # DISABLED
     url = _build_api_url(base_url, platform_config, context_path_override, 'url_get_all_spaces')
     params = {'limit': 200}
     return _execute_get_request(url, auth_info, params=params)

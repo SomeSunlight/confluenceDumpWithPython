@@ -6,3 +6,6 @@ __pycache__/
 
 PDS
 .DS_Store
+/styles/00 archive/
+00 archive/
+.idea/

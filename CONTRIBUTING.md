@@ -2,75 +2,59 @@
 
 This document explains the internal architecture of this script, primarily for future contributors or the original author when reviewing pull requests.
 
-## Refactoring Goal
+## Architectural Overview
 
-The main goal of the 2024 refactoring was to decouple the script from a specific Confluence platform (Confluence Cloud) and enable robust support for **Confluence Data Center (DC)**.
+The codebase has been refactored from a simple linear scraper to a multi-phase, multithreaded export engine designed for enterprise stability.
 
-The original code had hardcoded URLs (e.g., `f"https://{site}.atlassian.net/wiki/..."`) which made it impossible to use with self-hosted instances.
+### Core Philosophy
 
-## Core Architecture: `confluence_products.ini`
-
-The core of this new architecture is the `confluence_products.ini` file.
-
-This file acts as a **platform definition file**. It defines _how_ to talk to a specific platform, not _which_ instance to talk to.
-
-It contains profiles (e.g., `[cloud]`, `[dc]`) that specify two key things:
-
-1. `auth_method`: The authentication required (e.g., `basic_api_token` for Cloud, `bearer_pat` for DC).
+- **Inventory First:** We scan the entire structure _before_ downloading content. This allows for accurate progress bars (`tqdm`) and correct sorting.
     
-2. **URL Templates**: A list of API and view paths for all required functions (e.g., `url_get_page`, `url_view_page`).
+- **Static & Self-Contained:** The output HTML must work without a server, internet connection, or JavaScript dependencies (Zero-Dependency).
+    
+- **Platform Agnostic:** `confluence_products.ini` abstracts the differences between Cloud and Data Center.
     
 
-This approach allows the main script logic to be completely platform-agnostic.
+### The Export Pipeline (`confluenceDumpWithPython.py`)
 
-## How It Works: The Data Flow
-
-1. The main script (`confluenceDumpWithPython.py`) no longer accepts a "site" name. It now requires the user to specify:
+1. **Inventory Phase (Serial):**
     
-    - `--profile "cloud"`: Selects the `[cloud]` section from the `.ini`.
+    - Uses recursion (e.g., `recursive_scan`) to walk the Confluence tree using `child/page` endpoints.
         
-    - `--base-url "https://myteam.atlassian.net"`: Provides the specific instance URL.
+    - This guarantees the sidebar matches the _manual sort order_ of Confluence (unlike CQL search).
         
-2. At startup, the script calls `myModules.load_platform_config(profile)` to load all URL templates and settings for the chosen profile into a `platform_config` dictionary.
+    - Applies pruning (excludes) at this stage to save time.
+        
+    - Generates `sidebar.md` (Markdown representation) and `sidebar.html` (HTML Tree).
+        
+2. **Download Phase (Parallel):**
     
-3. It then calls `myModules.get_auth_config(platform_config)` to get the correct `requests` auth object or header (based on `auth_method` and environment variables).
+    - Uses `ThreadPoolExecutor` to fetch `export_view` HTML and attachments in parallel.
+        
+    - Calls `myModules.process_page_content` to sanitize HTML (BeautifulSoup).
+        
+3. **Injection Phase:**
     
-4. All API functions in `myModules.py` (e.g., `get_page_full`) are no longer hardcoded. They now receive the `base_url`, `platform_config`, and `auth_info` as arguments.
+    - Injects the pre-calculated Sidebar, Metadata, and CSS into every downloaded page.
+        
+
+### The Editor Workflow (`create_editor.py` & `patch_sidebar.py`)
+
+We treat the exported structure as mutable.
+
+- **`create_editor.py`**: Parses the `sidebar.md` and generates a standalone HTML Single-Page-Application using vanilla JavaScript. It allows Drag & Drop reordering.
     
-5. Inside `myModules.py`, a helper function (`_build_api_url`) dynamically constructs the correct, full URL by combining the `base_url`, the `context_path` (for DC), and the appropriate URL template from the `platform_config` dictionary.
+- **`patch_sidebar.py`**: Parses the modified Markdown and re-injects the new navigation tree into all existing HTML files.
     
 
-## How to Add a New Feature (e.g., "Add Comment")
+## Key Files
 
-If you want to add a new function that calls a new API endpoint, the process is simple and clean:
-
-1. **Add Templates to `.ini`**: Open `confluence_products.ini` and add the new URL template to _both_ profiles:
+- **`confluenceDumpWithPython.py`**: Main entry point and orchestration.
     
-    ```
-    [cloud]
-    ...
-    url_add_comment = /rest/api/content/{pageId}/child/comment
+- **`myModules.py`**: API abstraction, BeautifulSoup logic, and HTML templating.
     
-    [dc]
-    ...
-    url_add_comment = {context_path}/rest/api/content/{pageId}/child/comment
-    ```
+- **`confluence_products.ini`**: URL templates for Cloud vs. DC.
     
-2. **Add Function to `myModules.py`**: Create your new function (e.g., `add_comment`). Inside it, use the new config key by calling the internal helpers:
+- **`create_editor.py`**: Tool to generate the visual sidebar editor.
     
-    ```
-    def add_comment(pageId, comment_body, base_url, platform_config, auth_info, context_path_override):
-        path_params = {'pageId': pageId}
-        url = _build_api_url(
-            base_url, 
-            platform_config, 
-            context_path_override, 
-            'url_add_comment',  # This key must match the .ini
-            path_params
-        )
-    
-        payload = {"body": {"storage": {"value": comment_body, "representation": "storage"}}}
-    
-        # Use _execute_post_request (or similar)
-        # ...
-    ```
+- **`patch_sidebar.py`**: Tool to apply structure changes.

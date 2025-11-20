@@ -1,47 +1,41 @@
 # Confluence Dump with Python
 
-This script exports content from a Confluence instance (Cloud or Data Center) using various modes (single page, page tree, full space, all spaces, or by label).
+This script exports content from a Confluence instance (Cloud or Data Center) using various modes.
 
 **Key Features:**
 
-- **Visual Copy:** Fetches the rendered HTML (`export_view`) to preserve macros, tables, and formatting.
+- **Visual Fidelity & Sidebar:** Creates a visually faithful copy of Confluence pages, including a **fully functional, static navigation sidebar** on the left—something even the standard Confluence export does not provide.
     
-- **Offline Browsing:** Downloads embedded images/emoticons and rewrites links to be relative, creating a self-contained offline HTML archive.
+- **Offline Browsing:** Localizes images and links, and downloads **all** attachments (PDFs, Office docs, etc.) for complete offline access.
     
-- **Metadata:** Injects Confluence metadata (Page ID, Labels, Title) directly into the HTML headers.
+- **Recursive Inventory:** Scans the tree hierarchy to ensure the **correct sort order** (manual Confluence order) in the sidebar.
     
-- **Complete Archive:** Downloads _all_ page attachments, not just those displayed on the page.
+- **Metadata Injection:** Automatically adds Page Title, Author, and Modification Date to the top of every page.
     
-- **Multi-Format:** Exports as JSON (metadata + raw body), HTML (visual), and optional RST.
+- **Versioning:** Automatically creates timestamped output subfolders (e.g., `2025-11-21 1400 Space IT`). This allows you to run the script repeatedly (e.g., after changes in Confluence) and maintain a history of snapshots without overwriting previous exports.
     
-
-## Platform Support
-
-This script supports both:
-
-- **Confluence Cloud**
+- **Performance:** Supports **Multithreaded** downloading (`--threads`) to speed up the export of large spaces.
     
-- **Confluence Data Center**
+- **Tree Pruning:** Exclude specific branches with `--exclude-page-id` or `--exclude-label`.
+    
+- **Index Sandbox:** Includes visual tools to manually restructure the navigation tree via Drag & Drop and apply it to the downloaded files without affecting Confluence.
     
 
-The platform-specific API paths and authentication methods are defined in the `confluence_products.ini` file.
+## Missing Features / Ideas
+
+- **Incremental Update:** Currently, the script always performs a full export. An update mode that only downloads changed pages would be a valuable addition.
+    
 
 ## Requirements
 
 - Python 3.x
     
-- `requests`
+- `requests`, `beautifulsoup4`, `tqdm`
     
-- `beautifulsoup4` (for HTML parsing and link rewriting)
+- `pypandoc` (optional, only needed for RST export)
     
-- `pypandoc` (optional, for RST export or legacy HTML conversion)
-    
-
-## Installation
 
 ```
-git clone [https://github.com/jgoldin-skillz/confluenceDumpWithPython.git](https://github.com/jgoldin-skillz/confluenceDumpWithPython.git)
-cd confluenceDumpWithPython
 pip install -r requirements.txt
 ```
 
@@ -66,25 +60,15 @@ export CONFLUENCE_TOKEN="YourPersonalAccessTokenHere"
 
 ## Exporting with CSS Styling
 
-The script uses a robust **Two-Layer Styling Strategy** to ensure the exported HTML looks correct.
+The script uses a robust **Two-Layer Styling Strategy**.
 
 ### Layer 1: Standard CSS (Default)
 
-The project folder contains a `styles/` directory. This should contain a "Best Guess" CSS file (e.g., `site.css`) extracted from a standard Confluence instance.
-
-- **Automatic:** If a CSS file exists in the local `styles/` folder, it is **automatically applied** to every export.
-    
-- **Maintenance:** You can update this file manually if Confluence changes its base layout significantly.
-    
+The project folder contains a `styles/` directory. If a CSS file exists there (e.g., `styles/site.css`), it is **automatically applied** to every export.
 
 ### Layer 2: Custom CSS (Optional)
 
-If you have specific styles for your Space (logos, colors, custom macros) that override the standard look, you can provide a second CSS file via the command line.
-
-- **Usage:** Use `--css-file "/path/to/my_custom.css"`.
-    
-- **Behavior:** This file will be loaded **after** the standard CSS, allowing you to override specific styles without losing the basic formatting.
-    
+Use `--css-file "/path/to/my_custom.css"` to apply specific overrides. This file will be loaded **after** the standard CSS.
 
 ## Usage
 
@@ -94,52 +78,88 @@ If you have specific styles for your Space (logos, colors, custom macros) that o
 python3 confluenceDumpWithPython.py [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS]
 ```
 
-### Command-Line Arguments
-
-Run `python3 confluenceDumpWithPython.py -h` to see all options.
+### Global Options
 
 ```
-usage: confluenceDumpWithPython.py [-h] -o OUTDIR --base-url BASE_URL --profile PROFILE [--context-path CONTEXT_PATH] [-R] [--css-file CSS_FILE] {single,tree,space,all-spaces,label} ...
-
-Global Options:
-  -h, --help            show this help message and exit
   -o OUTDIR, --outdir OUTDIR
                         The output directory (will be created)
-  --base-url BASE_URL   The full base URL.
-  --profile PROFILE     Platform profile ('cloud' or 'dc').
-  --context-path CONTEXT_PATH
-                        (Data Center only) Manually override the context path.
-  -R, --rst             Export pages as RST.
-  --css-file CSS_FILE   Path to a local custom CSS file (applied AFTER standard CSS).
+  --base-url BASE_URL   Confluence Base URL (e.g., '[https://confluence.corp.com](https://confluence.corp.com)')
+  --profile PROFILE     Platform profile ('cloud' or 'dc')
+  --context-path PATH   (DC only) Context path (e.g., '/wiki')
+  --threads THREADS, -t THREADS
+                        Number of download threads (Default: 1)
+  --exclude-page-id ID  Exclude a page ID and its children (can be repeated)
+  --no-vpn-reminder     Skip the VPN check confirmation (DC only)
+  --css-file CSS_FILE   Path to custom CSS file
+  -R, --rst             Export pages as RST (requires pypandoc)
 ```
+
+### Commands
+
+- **`space`**: Dumps an entire space. Starts at the Space Homepage and recurses down.
+    
+    - `-sp`, `--space-key`: The Key of the space.
+        
+- **`tree`**: Dumps a specific page and all its descendants.
+    
+    - `-p`, `--pageid`: The Root Page ID.
+        
+- **`single`**: Dumps a single page.
+    
+    - `-p`, `--pageid`: The Page ID.
+        
+- **`label`**: Dumps pages by label ("Forest Mode"). Finds all pages with the label and treats them as roots for recursion.
+    
+    - `-l`, `--label`: The label to include.
+        
+    - `--exclude-label`: Exclude subtrees that have this specific label (e.g. 'archived').
+        
+- **`all-spaces`**: Dumps all visible spaces.
+    
 
 ### Examples
 
-#### 1\. Standard Dump (Uses default CSS)
-
-Dumps a page tree. Automatically applies `styles/site.css` if present in the script folder.
+**1\. Data Center: Entire Space, 8 Threads, Exclude Archive**
 
 ```
 python3 confluenceDumpWithPython.py \
-    --base-url "[https://confluence.mycompany.com](https://confluence.mycompany.com)" \
-    --profile "dc" \
+    --base-url "[https://confluence.corp.com](https://confluence.corp.com)" \
+    --profile dc \
     --context-path "/wiki" \
-    -o "./tree_dump" \
-    tree \
-    --pageid "67890"
+    -o "./dump_it" \
+    -t 8 \
+    --exclude-page-id "999999" \
+    space -sp "IT"
 ```
 
-#### 2\. Customized Dump (Standard + Custom CSS)
-
-Dumps a page tree. Applies `styles/site.css` (standard) AND `my_overrides.css` (custom).
+**2\. Cloud: Single Page Tree**
 
 ```
 python3 confluenceDumpWithPython.py \
-    --base-url "[https://confluence.mycompany.com](https://confluence.mycompany.com)" \
-    --profile "dc" \
-    --context-path "/wiki" \
-    -o "./tree_dump" \
-    --css-file "./my_overrides.css" \
-    tree \
-    --pageid "67890"
+    --base-url "[https://myteam.atlassian.net](https://myteam.atlassian.net)" \
+    --profile cloud \
+    -o "./dump_tree" \
+    tree -p "12345"
 ```
+
+## Index Restructuring Sandbox
+
+This additional toolset allows you to re-organize the pages and sub-pages structure (the index) of your export locally. This is useful for testing structural changes or cleaning up the navigation flow without touching Confluence or re-downloading pages.
+
+**The Workflow:**
+
+1. **Generate Editor:** Create a visual Drag & Drop editor for the index of all exported pages.
+    
+    ```
+    python3 create_editor.py --site-dir "./output/2025-01-01 Space IT"
+    ```
+    
+2. **Edit:** Open `editor_sidebar.html` in your browser. Move pages, create folders, delete items.
+    
+3. **Save:** Click "Copy Markdown" in the editor and paste the content into a new file `sidebar_edit.md` in the site directory.
+    
+4. **Apply:** Patch the new index structure into all **downloaded** HTML files.
+    
+    ```
+    python3 patch_sidebar.py --site-dir "./output/2025-01-01 Space IT"
+    ```
