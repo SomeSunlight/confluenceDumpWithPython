@@ -49,12 +49,7 @@ global_sidebar_html = ""
 # --- Helper Functions ---
 
 def sanitize_filename(filename):
-    """
-    Sanitizes a string to be safe for directory names.
-    Removes/replaces invalid characters for Windows/Linux/macOS.
-    """
-    # Replace bad chars with underscore or space
-    # Invalid chars: < > : " / \ | ? *
+    """ Sanitizes a string to be safe for directory names. """
     s = re.sub(r'[<>:"/\\|?*]', '_', filename)
     # Strip whitespace and dots from ends
     return s.strip().strip('.')
@@ -64,29 +59,21 @@ def get_run_title(args, base_url, platform_config, auth_info):
     """ Determines the semantic title for the output folder based on the command. """
     if args.command == 'all-spaces':
         return "all spaces"
-
     elif args.command == 'space':
         return f"Space {args.space_key}"
-
     elif args.command == 'label':
         return f"Export {args.label}"
-
     elif args.command in ('single', 'tree'):
-        # For page-based commands, we need the page title.
-        # We perform a quick API fetch here.
-        print(f"Fetching title for page {args.pageid} to name the output folder...")
         try:
-            # Assuming context path is needed for DC
             context_path = args.context_path
             page_data = myModules.get_page_basic(args.pageid, base_url, platform_config, auth_info, context_path)
             if page_data and 'title' in page_data:
                 return page_data['title']
             else:
-                return f"Page {args.pageid}"  # Fallback if title fetch fails
+                return f"Page {args.pageid}"
         except Exception as e:
             print(f"Warning: Could not fetch page title: {e}", file=sys.stderr)
             return f"Page {args.pageid}"
-
     return "Export"
 
 
@@ -153,23 +140,25 @@ def build_tree_structure(target_ids):
 def generate_tree_html(target_ids):
     tree_map, pages_map, root_ids = build_tree_structure(target_ids)
 
+    # Added \n for readability
     def build_branch(parent_id):
         if parent_id not in tree_map: return ""
-        html = "<ul>"
+        html = "<ul>\n"
         for child_id in tree_map[parent_id]:
             if child_id not in pages_map: continue
             child = pages_map[child_id]
             title = child['title']
             link = f'<a href="{child_id}.html">{title}</a>'
+
             if child_id in tree_map:
                 sub_tree = build_branch(child_id)
-                html += f'<li class="folder"><details><summary>{link}</summary>{sub_tree}</details></li>'
+                html += f'<li class="folder"><details><summary>{link}</summary>{sub_tree}</details></li>\n'
             else:
-                html += f'<li class="leaf">{link}</li>'
-        html += "</ul>"
+                html += f'<li class="leaf">{link}</li>\n'
+        html += "</ul>\n"
         return html
 
-    sidebar = '<div class="sidebar-tree"><ul>'
+    sidebar = '<div class="sidebar-tree"><ul>\n'
     for rid in root_ids:
         if rid not in pages_map: continue
         page = pages_map[rid]
@@ -177,10 +166,10 @@ def generate_tree_html(target_ids):
         link = f'<a href="{rid}.html">{title}</a>'
         if rid in tree_map:
             sub_tree = build_branch(rid)
-            sidebar += f'<li class="folder"><details open><summary>{link}</summary>{sub_tree}</details></li>'
+            sidebar += f'<li class="folder"><details open><summary>{link}</summary>{sub_tree}</details></li>\n'
         else:
-            sidebar += f'<li class="leaf">{link}</li>'
-    sidebar += '</ul></div>'
+            sidebar += f'<li class="leaf">{link}</li>\n'
+    sidebar += '</ul></div>\n'
     return sidebar
 
 
@@ -220,6 +209,10 @@ def save_sidebars(outdir, target_ids):
     with open(os.path.join(outdir, 'sidebar.md'), 'w', encoding='utf-8') as f:
         f.write(sidebar_md)
 
+    # Create sidebar_orig.md as backup (Golden Master)
+    with open(os.path.join(outdir, 'sidebar_orig.md'), 'w', encoding='utf-8') as f:
+        f.write(sidebar_md)
+
 
 # --- Core Logic ---
 
@@ -257,37 +250,39 @@ def process_page(page_id, global_args, active_css_files=None, exported_page_ids=
         convert_rst(page_id, processed_html, myModules.outdir_pages)
 
 
-# --- Index Generation ---
+# --- Index Generation (Restored) ---
 
 def build_index_html(output_dir, css_files=None):
+    """ Generates an index.html file listing all downloaded pages hierarchically. """
     print("\nGenerating global index.html...")
     tree_map, pages_map, root_ids = build_tree_structure(set(p['id'] for p in all_pages_metadata))
 
+    # Added \n for readability
     def build_list_html(parent_id):
         if parent_id not in tree_map: return ""
-        html = "<ul>"
+        html = "<ul>\n"
         for child_id in tree_map[parent_id]:
             if child_id in pages_map:
                 child = pages_map[child_id]
                 html += f'<li><a href="pages/{child_id}.html">{child["title"]}</a>'
                 html += build_list_html(child_id)
-                html += '</li>'
-        html += "</ul>"
+                html += '</li>\n'
+        html += "</ul>\n"
         return html
 
-    body_html = "<h1>Confluence Export Index</h1><ul>"
+    body_html = "<h1>Confluence Export Index</h1><ul>\n"
     for rid in root_ids:
         page = pages_map[rid]
         body_html += f'<li><a href="pages/{rid}.html">{page["title"]}</a>'
         body_html += build_list_html(rid)
-        body_html += '</li>'
-    body_html += "</ul>"
+        body_html += '</li>\n'
+    body_html += "</ul>\n"
 
     css_links = ""
     if css_files:
         for css in css_files:
             clean_css = css.replace('../', '')
-            css_links += f'<link rel="stylesheet" href="{clean_css}" type="text/css">'
+            css_links += f'<link rel="stylesheet" href="{clean_css}" type="text/css">\n'
 
     full_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Index</title>{css_links}<style>body{{font-family:sans-serif;padding:20px;}}ul{{list-style-type:disc;}}li{{margin-bottom:5px;}}a{{text-decoration:none;color:#0052cc;}}a:hover{{text-decoration:underline;}}</style></head><body>{body_html}</body></html>"""
 
@@ -435,55 +430,65 @@ def handle_all_spaces(args, active_css_files, exclude_ids):
 # --- Main ---
 
 def main():
-    parser = argparse.ArgumentParser(description="Confluence Dump")
-    g = parser.add_argument_group('Global Options')
-    g.add_argument('-o', '--outdir', required=True)
-    g.add_argument('--base-url', required=True)
-    g.add_argument('--profile', required=True)
-    g.add_argument('--context-path', default=None)
-    g.add_argument('--css-file', default=None)
-    g.add_argument('-R', '--rst', action='store_true')
-    g.add_argument('-t', '--threads', type=int, default=1)
-    g.add_argument('--exclude-page-id', action='append')
-    g.add_argument('--no-vpn-reminder', action='store_true')
+    parser = argparse.ArgumentParser(
+        description="Confluence Dump (Cloud/DC) with HTML Processing",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
 
-    subs = parser.add_subparsers(dest='command', required=True)
-    p_single = subs.add_parser('single');
-    p_single.add_argument('-p', '--pageid', required=True);
+    g = parser.add_argument_group('Global Options')
+    g.add_argument('-o', '--outdir', required=True, help="Output directory")
+    g.add_argument('--base-url', required=True, help="Confluence Base URL")
+    g.add_argument('--profile', required=True, help="cloud or dc")
+    g.add_argument('--context-path', default=None, help="Context path (DC only)")
+    g.add_argument('--css-file', default=None, help="Path to custom CSS file")
+    g.add_argument('-R', '--rst', action='store_true', help="Also export RST")
+    g.add_argument('-t', '--threads', type=int, default=1, help="Number of threads for download (Default: 1)")
+    g.add_argument('--exclude-page-id', action='append', help="Exclude a page ID and its children")
+    g.add_argument('--no-vpn-reminder', action='store_true', help="Skip the VPN check confirmation for Data Center")
+
+    subs = parser.add_subparsers(dest='command', required=True, title="Commands")
+
+    p_single = subs.add_parser('single', help="Dump a single page")
+    p_single.add_argument('-p', '--pageid', required=True, help="Page ID")
     p_single.set_defaults(func=handle_single)
-    p_tree = subs.add_parser('tree');
-    p_tree.add_argument('-p', '--pageid', required=True);
+
+    p_tree = subs.add_parser('tree', help="Dump a page tree (Recursive)")
+    p_tree.add_argument('-p', '--pageid', required=True, help="Root Page ID")
     p_tree.set_defaults(func=handle_tree)
-    p_space = subs.add_parser('space');
-    p_space.add_argument('-sp', '--space-key', required=True);
+
+    p_space = subs.add_parser('space', help="Dump an entire space (Recursive from Homepage)")
+    p_space.add_argument('-sp', '--space-key', required=True, help="Space Key")
     p_space.set_defaults(func=handle_space)
-    p_label = subs.add_parser('label');
-    p_label.add_argument('-l', '--label', required=True);
-    p_label.add_argument('--exclude-label');
+
+    p_label = subs.add_parser('label', help="Dump pages by label")
+    p_label.add_argument('-l', '--label', required=True, help="Label Name")
     p_label.set_defaults(func=handle_label)
-    p_all = subs.add_parser('all-spaces');
+
+    p_all = subs.add_parser('all-spaces', help="Dump all visible spaces")
     p_all.set_defaults(func=handle_all_spaces)
 
     args = parser.parse_args()
+
     global platform_config, auth_info
     active_css_files = []
     exclude_ids = set(args.exclude_page_id) if args.exclude_page_id else set()
+
     try:
         platform_config = myModules.load_platform_config(args.profile)
         auth_info = myModules.get_auth_config(platform_config)
+
         if args.profile == 'dc' and not args.no_vpn_reminder:
             print("\n[!] DATA CENTER CHECK: Are you connected to the VPN/Intranet?")
-            input("    Press Enter to confirm...")
+            input("    Press Enter to confirm connection (or Ctrl+C to cancel)...")
 
-        # --- NEW: Auto-Subfolder Generation ---
+        # --- Auto-Subfolder Generation ---
         timestamp = datetime.now().strftime("%Y-%m-%d %H%M")
         run_title = get_run_title(args, args.base_url, platform_config, auth_info)
         safe_title = sanitize_filename(run_title)
 
-        # Update output dir to include timestamped folder
         new_outdir = os.path.join(args.outdir, f"{timestamp} {safe_title}")
         print(f"Creating new output directory: {new_outdir}")
-        args.outdir = new_outdir  # Update arg for rest of script
+        args.outdir = new_outdir
 
         myModules.setup_output_directories(args.outdir)
         myModules.set_variables()
@@ -499,12 +504,17 @@ def main():
             target = os.path.join(myModules.outdir_styles, os.path.basename(args.css_file))
             shutil.copy(args.css_file, target)
             active_css_files.append(f"../styles/{os.path.basename(args.css_file)}")
+
+    except KeyboardInterrupt:
+        print("\nAborted by user.")
+        sys.exit(0)
     except Exception as e:
         print(f"Init Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
         args.func(args, active_css_files, exclude_ids)
+        # Build global index (optional, but good fallback)
         build_index_html(args.outdir, active_css_files)
         print(f"\nDump Complete. Output in {args.outdir}")
     except Exception as e:

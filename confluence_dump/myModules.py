@@ -291,8 +291,7 @@ def process_page_content(html_content, page_metadata, base_url, auth_info, css_f
     3. Downloads images & fixes links.
     4. Injects CSS & Sidebar.
     """
-    # FIX: Handle empty content gracefully by initializing soup with empty string.
-    # This ensures Title, Metadata, and Sidebar are still generated for folder-only pages.
+    # Handle empty content gracefully
     soup = BeautifulSoup(html_content or "", 'html.parser')
 
     valid_ids = set(exported_page_ids) if exported_page_ids else set()
@@ -347,7 +346,7 @@ def process_page_content(html_content, page_metadata, base_url, auth_info, css_f
     meta_ul = soup.new_tag('ul')
     meta_li = soup.new_tag('li', attrs={'class': 'page-metadata-modification-info'})
 
-    meta_li.append("Zuletzt aktualisiert von ")
+    meta_li.append("Last changed by ")
     span_author = soup.new_tag('span', attrs={'class': 'author'})
     span_author.string = author_name
     meta_li.append(span_author)
@@ -416,7 +415,7 @@ def process_page_content(html_content, page_metadata, base_url, auth_info, css_f
             max-width: 100%; 
         }
 
-        /* Metadata Styling */
+        /* Page Title & Metadata Styling */
         h1 { margin-top: 0; color: #172b4d; font-size: 2em; font-weight: 600; }
         .page-metadata { margin-bottom: 20px; font-size: 12px; color: #6b778c; }
         .page-metadata ul { list-style: none; padding: 0; margin: 0; }

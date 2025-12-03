@@ -2,6 +2,8 @@
 
 This script exports content from a Confluence instance (Cloud or Data Center) using various modes.
 
+![Screenshot downloaded Confluence Page with left the index](img/screenshot_downloaded_html.png)
+
 **Key Features:**
 
 - **Visual Fidelity & Sidebar:** Creates a visually faithful copy of Confluence pages, including a **fully functional, static navigation sidebar** on the left—something even the standard Confluence export does not provide.
