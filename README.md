@@ -2,44 +2,57 @@
 
 This script exports content from a Confluence instance (Cloud or Data Center) using various modes.
 
-![Screenshot downloaded Confluence Page with left the index](img/screenshot_downloaded_html.png)
-
 **Key Features:**
 
-- **Visual Fidelity & Sidebar:** Creates a visually faithful copy of Confluence pages, including a **fully functional, static navigation sidebar** on the left—something even the standard Confluence export does not provide.
+-   **Visual Fidelity & Sidebar:** Creates a visually faithful copy of Confluence pages, including a **fully functional, static navigation sidebar** on the left—something even the standard Confluence export does not provide.
     
-- **Offline Browsing:** Localizes images and links, and downloads **all** attachments (PDFs, Office docs, etc.) for complete offline access.
+-   **Offline Browsing:** Localizes images and links, and downloads **all** attachments (PDFs, Office docs, etc.) for complete offline access.
     
-- **Recursive Inventory:** Scans the tree hierarchy to ensure the **correct sort order** (manual Confluence order) in the sidebar.
+-   **Recursive Inventory:** Scans the tree hierarchy to ensure the **correct sort order** (manual Confluence order) in the sidebar.
     
-- **Metadata Injection:** Automatically adds Page Title, Author, and Modification Date to the top of every page.
+-   **Metadata Injection:** Automatically adds Page Title, Author, and Modification Date to the top of every page.
     
-- **Versioning:** Automatically creates timestamped output subfolders (e.g., `2025-11-21 1400 Space IT`). This allows you to run the script repeatedly (e.g., after changes in Confluence) and maintain a history of snapshots without overwriting previous exports.
+-   **Versioning:** Automatically creates timestamped output subfolders (e.g., `2025-11-21 1400 Space IT`) for clean history management. This allows you to run the script repeatedly (e.g., after changes in Confluence) and maintain a history of snapshots without overwriting previous exports.
     
-- **Performance:** Supports **Multithreaded** downloading (`--threads`) to speed up the export of large spaces.
+-   **Performance:** Supports **Multithreaded** downloading (`--threads`) to speed up the export of large spaces.
     
-- **Tree Pruning:** Exclude specific branches with `--exclude-page-id` or `--exclude-label`.
+-   **Tree Pruning:** Exclude specific branches with `--exclude-page-id` or `--exclude-label`.
     
-- **Index Sandbox:** Includes visual tools to manually restructure the navigation tree via Drag & Drop and apply it to the downloaded files without affecting Confluence.
+-   **Index Sandbox:** Includes visual tools to manually restructure the navigation tree via Drag & Drop and apply it to the downloaded files without affecting Confluence.
     
+
+## Platform Support
+
+This script supports both:
+
+-   **Confluence Cloud**
+    
+-   **Confluence Data Center**
+    
+
+The platform-specific API paths and authentication methods are defined in the `confluence_products.ini` file.
+
+> **⚠️ Note on Cloud Verification:** The support for **Confluence Cloud** has been carefully ported to the new modular architecture based on the original codebase. However, this refactoring was developed and tested against a **Confluence Data Center** environment.
+> 
+> While the logic remains consistent with the previous version, the Cloud mode has **not yet been verified in a live environment** by the current maintainer due to lack of access. If you encounter issues with Cloud authentication or API paths, please open an issue or submit a Pull Request.
 
 ## Missing Features / Ideas
 
-- **Incremental Update:** Currently, the script always performs a full export. An update mode that only downloads changed pages would be a valuable addition.
+-   **Incremental Update:** Currently, the script always performs a full export. An update mode that only downloads changed pages would be a valuable addition.
     
 
 ## Requirements
 
-- Python 3.x
+-   Python 3.x
     
-- `requests`, `beautifulsoup4`, `tqdm`
+-   `requests`, `beautifulsoup4`, `tqdm`
     
-- `pypandoc` (optional, only needed for RST export)
+-   `pypandoc` (optional, only needed for RST export)
     
 
-```
-pip install -r requirements.txt
-```
+    pip install -r requirements.txt
+    
+    
 
 ## Authentication
 
@@ -47,16 +60,16 @@ Authentication is handled via environment variables, based on the profile you se
 
 ### For Confluence Cloud (`--profile cloud`)
 
-```
-export CONFLUENCE_USER="your-email@example.com"
-export CONFLUENCE_TOKEN="YourApiTokenHere"
-```
+    export CONFLUENCE_USER="your-email@example.com"
+    export CONFLUENCE_TOKEN="YourApiTokenHere"
+    
+    
 
 ### For Confluence Data Center (`--profile dc`)
 
-```
-export CONFLUENCE_TOKEN="YourPersonalAccessTokenHere"
-```
+    export CONFLUENCE_TOKEN="YourPersonalAccessTokenHere"
+    
+    
 
 **⚠️ Troubleshooting Note for Data Center:** If authentication fails (Intranet/SSO blocks), ensure you are on VPN and PATs are enabled.
 
@@ -76,73 +89,73 @@ Use `--css-file "/path/to/my_custom.css"` to apply specific overrides. This file
 
 ### General Syntax
 
-```
-python3 confluenceDumpWithPython.py [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS]
-```
+    python3 confluenceDumpWithPython.py [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS]
+    
+    
 
 ### Global Options
 
-```
-  -o OUTDIR, --outdir OUTDIR
-                        The output directory (will be created)
-  --base-url BASE_URL   Confluence Base URL (e.g., '[https://confluence.corp.com](https://confluence.corp.com)')
-  --profile PROFILE     Platform profile ('cloud' or 'dc')
-  --context-path PATH   (DC only) Context path (e.g., '/wiki')
-  --threads THREADS, -t THREADS
-                        Number of download threads (Default: 1)
-  --exclude-page-id ID  Exclude a page ID and its children (can be repeated)
-  --no-vpn-reminder     Skip the VPN check confirmation (DC only)
-  --css-file CSS_FILE   Path to custom CSS file
-  -R, --rst             Export pages as RST (requires pypandoc)
-```
+      -o OUTDIR, --outdir OUTDIR
+                            The output directory (will be created)
+      --base-url BASE_URL   Confluence Base URL (e.g., '[https://confluence.corp.com](https://confluence.corp.com)')
+      --profile PROFILE     Platform profile ('cloud' or 'dc')
+      --context-path PATH   (DC only) Context path (e.g., '/wiki')
+      --threads THREADS, -t THREADS
+                            Number of download threads (Default: 1)
+      --exclude-page-id ID  Exclude a page ID and its children (can be repeated)
+      --no-vpn-reminder     Skip the VPN check confirmation (DC only)
+      --css-file CSS_FILE   Path to custom CSS file
+      -R, --rst             Export pages as RST (requires pypandoc)
+    
+    
 
 ### Commands
 
-- **`space`**: Dumps an entire space. Starts at the Space Homepage and recurses down.
+-   **`space`**: Dumps an entire space. Starts at the Space Homepage and recurses down.
     
-    - `-sp`, `--space-key`: The Key of the space.
+    -   `-sp`, `--space-key`: The Key of the space.
         
-- **`tree`**: Dumps a specific page and all its descendants.
+-   **`tree`**: Dumps a specific page and all its descendants.
     
-    - `-p`, `--pageid`: The Root Page ID.
+    -   `-p`, `--pageid`: The Root Page ID.
         
-- **`single`**: Dumps a single page.
+-   **`single`**: Dumps a single page.
     
-    - `-p`, `--pageid`: The Page ID.
+    -   `-p`, `--pageid`: The Page ID.
         
-- **`label`**: Dumps pages by label ("Forest Mode"). Finds all pages with the label and treats them as roots for recursion.
+-   **`label`**: Dumps pages by label ("Forest Mode"). Finds all pages with the label and treats them as roots for recursion.
     
-    - `-l`, `--label`: The label to include.
+    -   `-l`, `--label`: The label to include.
         
-    - `--exclude-label`: Exclude subtrees that have this specific label (e.g. 'archived').
+    -   `--exclude-label`: Exclude subtrees that have this specific label (e.g. 'archived').
         
-- **`all-spaces`**: Dumps all visible spaces.
+-   **`all-spaces`**: Dumps all visible spaces.
     
 
 ### Examples
 
 **1\. Data Center: Entire Space, 8 Threads, Exclude Archive**
 
-```
-python3 confluenceDumpWithPython.py \
-    --base-url "[https://confluence.corp.com](https://confluence.corp.com)" \
-    --profile dc \
-    --context-path "/wiki" \
-    -o "./dump_it" \
-    -t 8 \
-    --exclude-page-id "999999" \
-    space -sp "IT"
-```
+    python3 confluenceDumpWithPython.py \
+        --base-url "[https://confluence.corp.com](https://confluence.corp.com)" \
+        --profile dc \
+        --context-path "/wiki" \
+        -o "./dump_it" \
+        -t 8 \
+        --exclude-page-id "999999" \
+        space -sp "IT"
+    
+    
 
 **2\. Cloud: Single Page Tree**
 
-```
-python3 confluenceDumpWithPython.py \
-    --base-url "[https://myteam.atlassian.net](https://myteam.atlassian.net)" \
-    --profile cloud \
-    -o "./dump_tree" \
-    tree -p "12345"
-```
+    python3 confluenceDumpWithPython.py \
+        --base-url "[https://myteam.atlassian.net](https://myteam.atlassian.net)" \
+        --profile cloud \
+        -o "./dump_tree" \
+        tree -p "12345"
+    
+    
 
 ## Index Restructuring Sandbox
 
@@ -150,18 +163,19 @@ This additional toolset allows you to re-organize the pages and sub-pages struct
 
 **The Workflow:**
 
-1. **Generate Editor:** Create a visual Drag & Drop editor for the index of all exported pages.
+1.  **Generate Editor:** Create a visual Drag & Drop editor for the index of all exported pages.
     
-    ```
-    python3 create_editor.py --site-dir "./output/2025-01-01 Space IT"
-    ```
+        python3 create_editor.py --site-dir "./output/2025-01-01 Space IT"
+        
+        
     
-2. **Edit:** Open `editor_sidebar.html` in your browser. Move pages, create folders, delete items.
+2.  **Edit:** Open `editor_sidebar.html` in your browser. Move pages, create folders, delete items.
     
-3. **Save:** Click "Copy Markdown" in the editor and paste the content into a new file `sidebar_edit.md` in the site directory.
+3.  **Save:** Click "Copy Markdown" in the editor and paste the content into a new file `sidebar_edit.md` in the site directory.
     
-4. **Apply:** Patch the new index structure into all **downloaded** HTML files.
+4.  **Apply:** Patch the new index structure into all **downloaded** HTML files.
     
-    ```
-    python3 patch_sidebar.py --site-dir "./output/2025-01-01 Space IT"
-    ```
+        python3 patch_sidebar.py --site-dir "./output/2025-01-01 Space IT"
+
+
+
